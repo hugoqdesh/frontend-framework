@@ -55,23 +55,3 @@ function renderElement(node) {
 function mount(vnode, container) {
 	container.appendChild(renderElement(vnode));
 }
-
-const state = new Reactive(0);
-
-function App() {
-	return createElement(
-		"div",
-		{},
-		`Count: ${state.value}`,
-		createElement("button", { onclick: () => state.value++ }, "+"),
-	);
-}
-
-function renderApp() {
-	const root = document.getElementById("root");
-	root.innerHTML = "";
-	mount(App(), root);
-}
-
-state.subscribe(renderApp);
-renderApp();
