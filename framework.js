@@ -35,6 +35,10 @@ function createElement(tag, props, ...children) {
 function renderElement(node) {
 	if (typeof node === "string") return document.createTextNode(node);
 
+	if (typeof node.tag === "function") {
+		return renderElement(node.tag(node.props));
+	}
+
 	const el = document.createElement(node.tag);
 
 	if (node.props) {
