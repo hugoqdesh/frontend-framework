@@ -5,7 +5,7 @@ function Counter() {
 		"div",
 		{},
 		createElement("p", {}, `Count: ${count.value}`),
-		createElement("button", { onclick: () => count.value++ }, "Increment"),
+		createElement("button", { onClick: () => count.value++ }, "Increment"),
 	);
 }
 

@@ -40,7 +40,7 @@ function renderElement(node) {
 	if (node.props) {
 		Object.entries(node.props).forEach(([key, value]) => {
 			if (key.startsWith("on")) {
-				const eventName = key.toLowerCase().substring(2);
+				const eventName = key.slice(2).toLowerCase();
 				el.addEventListener(eventName, value);
 			} else {
 				el.setAttribute(key, value);
