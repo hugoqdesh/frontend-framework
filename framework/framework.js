@@ -33,6 +33,26 @@ function createElement(tag, props, ...children) {
 	return { tag, props, children };
 }
 
+function setStyle(el, value) {
+	if (value == null) return;
+
+	if (typeof value === "string") {
+		el.style.cssText = value;
+		return;
+	}
+
+	Object.entries(value).forEach(([key, styleValue]) => {
+		if (styleValue == null) return;
+
+		if (key.startsWith("--") || key.includes("-")) {
+			el.style.setProperty(key, String(styleValue));
+			return;
+		}
+
+		el.style[key] = String(styleValue);
+	});
+}
+
 function renderElement(node) {
 	if (typeof node === "string") return document.createTextNode(node);
 
@@ -47,9 +67,15 @@ function renderElement(node) {
 			if (key.startsWith("on")) {
 				const eventName = key.slice(2).toLowerCase();
 				el.addEventListener(eventName, value);
-			} else {
-				el.setAttribute(key, value);
+				return;
 			}
+
+			if (key === "style") {
+				setStyle(el, value);
+				return;
+			}
+
+			el.setAttribute(key, value);
 		});
 	}
 
