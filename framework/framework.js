@@ -66,7 +66,20 @@ function renderElement(node) {
 		Object.entries(node.props).forEach(([key, value]) => {
 			if (key.startsWith("on")) {
 				const eventName = key.slice(2).toLowerCase();
-				el.addEventListener(eventName, value);
+
+				if (Array.isArray(value)) {
+					const [selector, handler] = value;
+
+					el.addEventListener(eventName, (event) => {
+						const target = event.target.closest(selector);
+						if (target && el.contains(target)) {
+							handler(event, target);
+						}
+					});
+				} else {
+					el.addEventListener(eventName, value);
+				}
+
 				return;
 			}
 
