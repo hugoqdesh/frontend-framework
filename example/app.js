@@ -1,47 +1,24 @@
 const count = new Reactive(0);
-count.subscribe(() => rerender(app()));
 
 function Counter() {
-	return createElement(
-		"div",
-		{},
-		createElement("p", {}, `Count: ${count.value}`),
-		createElement("button", { onClick: () => count.value++ }, "Increment"),
-	);
+  return createElement(
+    "div",
+    {},
+    createElement("h1", {}, `Count: ${count.value}`),
+    createElement("button", { onClick: () => count.value++ }, "+"),
+    createElement("button", { onClick: () => count.value-- }, "-"),
+    createElement("button", { onClick: () => (count.value = 0) }, "Reset"),
+  );
 }
 
-function About() {
-	return createElement(
-		"div",
-		{},
-		createElement("h1", {}, "About Page"),
-		createElement(
-			"button",
-			{ onClick: () => Router.navigate(baseUrl + "/") },
-			"Go Home",
-		),
-	);
-}
+count.subscribe(() => rerender(Counter()));
 
-function app() {
-	return createElement(
-		"div",
-		{},
-		createElement("h1", {}, "My Framework 🚀"),
-		createElement(Counter),
-		createElement(
-			"button",
-			{ onClick: () => Router.navigate(baseUrl + "/about") },
-			"Go to About",
-		),
-	);
-}
-
-const baseUrl = "/example";
-Router.add(baseUrl + "/", app);
-Router.add(baseUrl + "/about", About);
+// const baseUrl = "/example";
+// Router.add(baseUrl + "/", app);
+// Router.add(baseUrl + "/about", About);
+// Router.add(baseUrl + "/login", Login);
 
 window.onload = () => {
-	const root = document.getElementById("root");
-	Router.init(root);
+  const root = document.getElementById("root");
+  mount(Counter(), root);
 };
