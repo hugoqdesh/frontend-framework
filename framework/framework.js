@@ -1,5 +1,3 @@
-// Reactive
-
 class Reactive {
 	constructor(value) {
 		this._value = value;
@@ -10,43 +8,217 @@ class Reactive {
 		return this._value;
 	}
 
-	set value(newValue) {
-		console.log("setting value...");
-		if (this._value === newValue) return;
-		this._value = newValue;
-		console.log("value set to " + this._value);
-		this.subscribers.forEach((fn) => fn());
+	set value(nextValue) {
+		if (Object.is(this._value, nextValue)) return;
+		this._value = nextValue;
+		this.notify();
 	}
 
-	subscribe(fn) {
-		this.subscribers.add(fn);
-		// Returns an unsubscribe function
-		return () => this.subscribers.delete(fn);
+	update(updater) {
+		this.value = updater(this._value);
+	}
+
+	subscribe(callback, options = {}) {
+		this.subscribers.add(callback);
+
+		if (options.immediate) {
+			callback(this._value);
+		}
+
+		return () => this.subscribers.delete(callback);
+	}
+
+	notify() {
+		this.subscribers.forEach((callback) => callback(this._value));
 	}
 }
 
-// Component
-// Base class for class-based components (optional to use).
-
 class Component {
-	constructor(props) {
+	constructor(props = {}) {
 		this.props = props;
 	}
 
 	render() {
-		return createElement("div", {}, "Default Component");
+		return null;
 	}
 }
 
-// createElement / setStyle
-// Build a lightweight virtual DOM node: { tag, props, children }.
-
 function createElement(tag, props, ...children) {
-	return { tag, props: props || {}, children: children.flat() };
+	return {
+		tag,
+		props: props || {},
+		children: flattenChildren(children),
+	};
+}
+
+function flattenChildren(children, result = []) {
+	children.forEach((child) => {
+		if (Array.isArray(child)) {
+			flattenChildren(child, result);
+			return;
+		}
+
+		if (child == null || child === false) return;
+		result.push(child);
+	});
+
+	return result;
+}
+
+function isClassComponent(tag) {
+	return typeof tag === "function" && tag.prototype instanceof Component;
+}
+
+function resolveNode(node) {
+	if (node == null || node === false) return null;
+	if (typeof node === "string" || typeof node === "number") return node;
+
+	if (typeof node.tag === "function") {
+		const props = {
+			...(node.props || {}),
+			children: node.children || [],
+		};
+
+		if (isClassComponent(node.tag)) {
+			const instance = new node.tag(props);
+			return resolveNode(instance.render());
+		}
+
+		return resolveNode(node.tag(props));
+	}
+
+	return {
+		...node,
+		props: node.props || {},
+		children: flattenChildren(
+			(node.children || []).map((child) => resolveNode(child)),
+		),
+	};
+}
+
+function renderElement(node) {
+	const resolved = resolveNode(node);
+
+	if (resolved == null) {
+		return document.createComment("");
+	}
+
+	if (typeof resolved === "string" || typeof resolved === "number") {
+		return document.createTextNode(String(resolved));
+	}
+
+	const el = document.createElement(resolved.tag);
+	applyProps(el, {}, resolved.props, resolved.tag);
+
+	resolved.children.forEach((child) => {
+		const renderedChild = renderElement(child);
+		el.appendChild(renderedChild);
+	});
+
+	return el;
+}
+
+function isEventProp(key) {
+	return key.startsWith("on") && key.length > 2;
+}
+
+function eventNameFromProp(key) {
+	return key.slice(2).toLowerCase();
+}
+
+function normalizeEventDescriptor(value) {
+	if (typeof value === "function") {
+		return {
+			handler: value,
+			selector: null,
+			preventDefault: false,
+			stopPropagation: false,
+			options: undefined,
+		};
+	}
+
+	if (Array.isArray(value) && value.length >= 2) {
+		const [selector, handler, config = {}] = value;
+		return {
+			handler,
+			selector,
+			preventDefault: Boolean(config.preventDefault),
+			stopPropagation: Boolean(config.stopPropagation),
+			options: config.options,
+		};
+	}
+
+	if (
+		value &&
+		typeof value === "object" &&
+		typeof value.handler === "function"
+	) {
+		return {
+			handler: value.handler,
+			selector: value.delegate || null,
+			preventDefault: Boolean(value.preventDefault),
+			stopPropagation: Boolean(value.stopPropagation),
+			options: value.options,
+		};
+	}
+
+	return null;
+}
+
+function setEventListener(el, key, value) {
+	const eventName = eventNameFromProp(key);
+	const events = el.__dotEvents || (el.__dotEvents = {});
+
+	if (events[eventName]) {
+		el.removeEventListener(
+			eventName,
+			events[eventName].listener,
+			events[eventName].options,
+		);
+		delete events[eventName];
+	}
+
+	const descriptor = normalizeEventDescriptor(value);
+	if (!descriptor) return;
+
+	const listener = (event) => {
+		let matchedTarget = el;
+
+		if (descriptor.selector) {
+			matchedTarget = event.target.closest(descriptor.selector);
+			if (!matchedTarget || !el.contains(matchedTarget)) return;
+		}
+
+		if (descriptor.preventDefault) event.preventDefault();
+		if (descriptor.stopPropagation) event.stopPropagation();
+
+		descriptor.handler(event, matchedTarget);
+	};
+
+	el.addEventListener(eventName, listener, descriptor.options);
+	events[eventName] = {
+		listener,
+		options: descriptor.options,
+	};
+}
+
+function removeEventListener(el, key) {
+	const events = el.__dotEvents;
+	if (!events) return;
+
+	const eventName = eventNameFromProp(key);
+	const entry = events[eventName];
+
+	if (!entry) return;
+	el.removeEventListener(eventName, entry.listener, entry.options);
+	delete events[eventName];
 }
 
 function setStyle(el, value) {
-	if (value == null) return;
+	if (value == null) {
+		el.removeAttribute("style");
+		return;
+	}
 
 	if (typeof value === "string") {
 		el.style.cssText = value;
@@ -55,45 +227,61 @@ function setStyle(el, value) {
 
 	Object.entries(value).forEach(([key, styleValue]) => {
 		if (styleValue == null) return;
+
 		if (key.startsWith("--") || key.includes("-")) {
 			el.style.setProperty(key, String(styleValue));
-		} else {
-			el.style[key] = String(styleValue);
+			return;
 		}
+
+		el.style[key] = String(styleValue);
 	});
 }
 
-// renderElement
-// Turn a vnode into a real DOM element. Used when creating from scratch.
-
-function renderElement(node) {
-	if (typeof node === "string" || typeof node === "number") {
-		return document.createTextNode(String(node));
+function patchStyle(el, oldValue, newValue) {
+	if (newValue == null) {
+		el.removeAttribute("style");
+		return;
 	}
 
-	if (typeof node.tag === "function") {
-		return renderElement(node.tag(node.props));
-	}
-
-	const el = document.createElement(node.tag);
-
-	applyProps(el, node.props, node.tag);
-
-	node.children.forEach((child) => {
-		if (child != null && child !== false) {
-			el.appendChild(renderElement(child));
+	if (typeof oldValue === "string" || typeof newValue === "string") {
+		if (oldValue !== newValue) {
+			setStyle(el, newValue);
 		}
+		return;
+	}
+
+	const oldEntries = oldValue || {};
+	const newEntries = newValue || {};
+
+	Object.keys(oldEntries).forEach((key) => {
+		if (key in newEntries) return;
+
+		if (key.startsWith("--") || key.includes("-")) {
+			el.style.removeProperty(key);
+			return;
+		}
+
+		el.style[key] = "";
 	});
 
-	return el;
-}
+	Object.entries(newEntries).forEach(([key, styleValue]) => {
+		if (oldEntries[key] === styleValue) return;
 
-// Helpers
-function applyProps(el, props, tag) {
-	if (!props) return;
+		if (styleValue == null) {
+			if (key.startsWith("--") || key.includes("-")) {
+				el.style.removeProperty(key);
+			} else {
+				el.style[key] = "";
+			}
+			return;
+		}
 
-	Object.entries(props).forEach(([key, value]) => {
-		applyProp(el, key, value, tag);
+		if (key.startsWith("--") || key.includes("-")) {
+			el.style.setProperty(key, String(styleValue));
+			return;
+		}
+
+		el.style[key] = String(styleValue);
 	});
 }
 
@@ -103,17 +291,23 @@ function applyProp(el, key, value, tag) {
 		return;
 	}
 
-	if (key.startsWith("on")) {
-		const eventName = key.slice(2).toLowerCase();
-		if (Array.isArray(value)) {
-			const [selector, handler] = value;
-			el.addEventListener(eventName, (event) => {
-				const target = event.target.closest(selector);
-				if (target && el.contains(target)) handler(event, target);
-			});
-		} else {
-			el.addEventListener(eventName, value);
-		}
+	if (isEventProp(key)) {
+		setEventListener(el, key, value);
+		return;
+	}
+
+	if (key === "style") {
+		setStyle(el, value);
+		return;
+	}
+
+	if (key === "className") {
+		el.setAttribute("class", value || "");
+		return;
+	}
+
+	if (key === "htmlFor") {
+		el.setAttribute("for", value || "");
 		return;
 	}
 
@@ -126,12 +320,16 @@ function applyProp(el, key, value, tag) {
 	}
 
 	if (key === "checked" && tag === "input") {
-		el.checked = !!value;
+		el.checked = Boolean(value);
 		return;
 	}
 
-	if (key === "style") {
-		setStyle(el, value);
+	if (typeof value === "boolean") {
+		if (value) {
+			el.setAttribute(key, "");
+		} else {
+			el.removeAttribute(key);
+		}
 		return;
 	}
 
@@ -140,195 +338,458 @@ function applyProp(el, key, value, tag) {
 	}
 }
 
-// diff
-// Compare two vnodes and update only what changed in the real DOM.
-//
-//   1. Note a fresh element and append it
-//   2. No new node  → r old node  → creaemove the existing element
-//   3. Both exist   → compare and patch in-place (or replace if tags differ)
+function removeProp(el, key, oldValue, tag) {
+	if (key === "ref") return;
 
-function diff(parent, oldNode, newNode, index = 0) {
-	const existing = parent.childNodes[index];
-
-	if (oldNode == null) {
-		if (newNode != null && newNode !== false) {
-			parent.appendChild(renderElement(newNode));
-		}
+	if (isEventProp(key)) {
+		removeEventListener(el, key);
 		return;
 	}
 
-	if (newNode == null || newNode === false) {
-		if (existing) parent.removeChild(existing);
+	if (key === "style") {
+		el.removeAttribute("style");
 		return;
 	}
 
-	if (isTextNode(oldNode) && isTextNode(newNode)) {
-		if (String(oldNode) !== String(newNode)) {
-			existing.textContent = String(newNode);
-		}
+	if (key === "className") {
+		el.removeAttribute("class");
+		return;
+	}
+
+	if (key === "htmlFor") {
+		el.removeAttribute("for");
 		return;
 	}
 
 	if (
-		isTextNode(oldNode) !== isTextNode(newNode) ||
-		oldNode.tag !== newNode.tag
+		key === "value" &&
+		(tag === "input" || tag === "textarea" || tag === "select")
 	) {
-		parent.replaceChild(renderElement(newNode), existing);
+		el.value = "";
 		return;
 	}
 
-	if (typeof newNode.tag === "function") {
-		const resolvedOld =
-			typeof oldNode.tag === "function" ? oldNode.tag(oldNode.props) : oldNode;
-		const resolvedNew = newNode.tag(newNode.props);
-		diff(parent, resolvedOld, resolvedNew, index);
+	if (key === "checked" && tag === "input") {
+		el.checked = false;
 		return;
 	}
 
-	patchProps(existing, oldNode.props, newNode.props, newNode.tag);
-	diffChildren(existing, oldNode.children, newNode.children);
+	if (typeof oldValue === "boolean") {
+		el.removeAttribute(key);
+		return;
+	}
+
+	el.removeAttribute(key);
+}
+
+function applyProps(el, oldProps, newProps, tag) {
+	const previous = oldProps || {};
+	const next = newProps || {};
+
+	Object.keys(previous).forEach((key) => {
+		if (key in next) return;
+		removeProp(el, key, previous[key], tag);
+	});
+
+	Object.entries(next).forEach(([key, value]) => {
+		if (key === "style") {
+			patchStyle(el, previous.style, value);
+			return;
+		}
+
+		if (isEventProp(key)) {
+			if (previous[key] !== value) {
+				setEventListener(el, key, value);
+			}
+			return;
+		}
+
+		if (previous[key] === value) return;
+		applyProp(el, key, value, tag);
+	});
 }
 
 function isTextNode(node) {
 	return typeof node === "string" || typeof node === "number";
 }
 
-// Patch only the props that actually changed
-function patchProps(el, oldProps, newProps, tag) {
-	oldProps = oldProps || {};
-	newProps = newProps || {};
+function describeNode(node) {
+	const resolved = resolveNode(node);
 
-	Object.keys(oldProps).forEach((key) => {
-		if (key.startsWith("on") || key === "ref") return;
-		if (!(key in newProps)) {
-			if (key === "style") {
-				el.style.cssText = "";
-			} else {
-				el.removeAttribute(key);
-			}
+	if (resolved == null) return "null";
+	if (isTextNode(resolved)) return `text(${String(resolved)})`;
+	return `tag(${resolved.tag})`;
+}
+
+function diff(parent, oldNode, newNode, index = 0) {
+	if (!parent) {
+		throw new Error(
+			`diff parent missing at index ${index}: ${describeNode(oldNode)} -> ${describeNode(newNode)}`,
+		);
+	}
+
+	const previous = resolveNode(oldNode);
+	const next = resolveNode(newNode);
+	const existing = parent.childNodes[index];
+
+	if (previous != null && next != null && !existing) {
+		const parentTag =
+			parent.nodeType === Node.ELEMENT_NODE
+				? parent.tagName.toLowerCase()
+				: `node-${parent.nodeType}`;
+		throw new Error(
+			`missing DOM child at index ${index} under ${parentTag}: ${describeNode(oldNode)} -> ${describeNode(newNode)}`,
+		);
+	}
+
+	if (previous == null) {
+		if (next != null) {
+			parent.appendChild(renderElement(next));
 		}
-	});
+		return;
+	}
 
-	Object.entries(newProps).forEach(([key, value]) => {
-		if (key.startsWith("on") || key === "ref") return; // events are set once on creation
-		if (oldProps[key] === value) return; // unchanged — skip
-		applyProp(el, key, value, tag);
-	});
+	if (next == null) {
+		if (existing) parent.removeChild(existing);
+		return;
+	}
+
+	if (isTextNode(previous) && isTextNode(next)) {
+		if (String(previous) !== String(next)) {
+			existing.textContent = String(next);
+		}
+		return;
+	}
+
+	if (isTextNode(previous) !== isTextNode(next) || previous.tag !== next.tag) {
+		parent.replaceChild(renderElement(next), existing);
+		return;
+	}
+
+	applyProps(existing, previous.props, next.props, next.tag);
+	diffChildren(existing, previous.children, next.children);
 }
 
-// Diff children arrays
 function diffChildren(parent, oldChildren = [], newChildren = []) {
-	const length = Math.max(oldChildren.length, newChildren.length);
-
-	for (let i = 0; i < length; i++) {
-		diff(parent, oldChildren[i], newChildren[i], i);
+	if (oldChildren.length !== newChildren.length) {
+		parent.innerHTML = "";
+		newChildren.forEach((child) => {
+			parent.appendChild(renderElement(child));
+		});
+		return;
 	}
 
-	while (
-		parent.childNodes.length >
-		newChildren.filter((c) => c != null && c !== false).length
-	) {
-		parent.removeChild(parent.lastChild);
+	const sharedLength = Math.min(oldChildren.length, newChildren.length);
+
+	for (let index = 0; index < sharedLength; index += 1) {
+		diff(parent, oldChildren[index], newChildren[index], index);
 	}
 }
-
-// mount / rerender
-// mount: initial render (wipes the container).
-// rerender: diff the new tree against the last rendered tree.
 
 let rootInstance = null;
 
 function mount(vnode, container) {
+	const resolved = resolveNode(vnode);
 	container.innerHTML = "";
-	const el = renderElement(vnode);
-	container.appendChild(el);
-	rootInstance = { vnode, container };
+	container.appendChild(renderElement(resolved));
+	rootInstance = { vnode: resolved, container };
 }
 
-function rerender(newVnode) {
+function rerender(vnode) {
 	if (!rootInstance) return;
-	diff(rootInstance.container, rootInstance.vnode, newVnode, 0);
-	rootInstance.vnode = newVnode;
+	const resolved = resolveNode(vnode);
+	diff(rootInstance.container, rootInstance.vnode, resolved, 0);
+	rootInstance.vnode = resolved;
 }
-
-// Store
-// Global key-value store of Reactive values for shared state.
 
 const Store = {
-	state: {},
+	state: Object.create(null),
 
 	create(key, initialValue) {
-		this.state[key] = new Reactive(initialValue);
+		if (!this.state[key]) {
+			this.state[key] = new Reactive(initialValue);
+		}
+
 		return this.state[key];
 	},
 
 	get(key) {
 		return this.state[key];
 	},
+
+	reset() {
+		this.state = Object.create(null);
+	},
 };
 
-// Router
-// Hash-free client-side router using the History API.
+function normalizePath(path) {
+	if (!path) return "/";
+	return path.startsWith("/") ? path : `/${path}`;
+}
 
 const Router = {
-	routes: {},
+	routes: Object.create(null),
 	root: null,
+	mode: "hash",
+	notFoundComponent: null,
 	_currentVnode: null,
+	_listener: null,
+	_eventName: null,
 
 	add(path, component) {
-		this.routes[path] = component;
+		this.routes[normalizePath(path)] = component;
+		return this;
+	},
+
+	notFound(component) {
+		this.notFoundComponent = component;
+		return this;
+	},
+
+	getPath() {
+		if (this.mode === "hash") {
+			const hash = window.location.hash.replace(/^#/, "");
+			return normalizePath(hash || "/");
+		}
+
+		return normalizePath(window.location.pathname || "/");
 	},
 
 	navigate(path) {
-		window.history.pushState({}, "", path);
-		this.render();
-	},
+		const nextPath = normalizePath(path);
 
-	render() {
-		const path = window.location.pathname;
-		const Component = this.routes[path];
+		if (this.mode === "hash") {
+			const nextHash = `#${nextPath}`;
 
-		if (!Component) {
-			this.root.innerHTML = "<p>404 — Page not found</p>";
-			this._currentVnode = null;
+			if (window.location.hash === nextHash) {
+				this.render();
+				return;
+			}
+
+			window.location.hash = nextHash;
 			return;
 		}
 
-		const newVnode = createElement(Component);
-
-		if (!this._currentVnode) {
-			mount(newVnode, this.root);
-		} else {
-			diff(this.root, this._currentVnode, newVnode, 0);
-		}
-
-		this._currentVnode = newVnode;
-		rootInstance = { vnode: newVnode, container: this.root };
+		window.history.pushState({}, "", nextPath);
+		this.render();
 	},
 
-	init(rootElement) {
+	resolveComponent() {
+		return this.routes[this.getPath()] || this.notFoundComponent;
+	},
+
+	render() {
+		if (!this.root) return;
+
+		const ActiveComponent = this.resolveComponent();
+		const vnode = ActiveComponent
+			? createElement(ActiveComponent, { path: this.getPath() })
+			: createElement("p", {}, "Route not found.");
+		const resolved = resolveNode(vnode);
+
+		if (!this._currentVnode) {
+			mount(resolved, this.root);
+		} else {
+			diff(this.root, this._currentVnode, resolved, 0);
+			rootInstance = { vnode: resolved, container: this.root };
+		}
+
+		this._currentVnode = resolved;
+	},
+
+	start(rootElement, options = {}) {
 		this.root = rootElement;
-		window.addEventListener("popstate", () => this.render());
+		this.mode = options.mode || "hash";
+
+		if (this._listener && this._eventName) {
+			window.removeEventListener(this._eventName, this._listener);
+		}
+
+		this._eventName = this.mode === "hash" ? "hashchange" : "popstate";
+		this._listener = () => this.render();
+		window.addEventListener(this._eventName, this._listener);
+
+		if (this.mode === "hash" && !window.location.hash) {
+			window.location.hash = "/";
+		}
+
 		this.render();
 	},
 };
 
-// http
+function Link(props = {}) {
+	const { to = "/", children = [], onClick, ...rest } = props;
+	const href =
+		Router.mode === "hash" ? `#${normalizePath(to)}` : normalizePath(to);
+
+	return createElement(
+		"a",
+		{
+			...rest,
+			href,
+			onClick: {
+				handler: (event, target) => {
+					if (
+						typeof onClick === "function" &&
+						onClick(event, target) === false
+					) {
+						return;
+					}
+
+					Router.navigate(to);
+				},
+				preventDefault: true,
+			},
+		},
+		...children,
+	);
+}
+
+function getVirtualWindow({
+	itemCount,
+	itemHeight,
+	height,
+	scrollTop = 0,
+	overscan = 4,
+}) {
+	const safeItemCount = Math.max(0, Number(itemCount) || 0);
+	const safeItemHeight = Math.max(1, Number(itemHeight) || 1);
+	const safeHeight = Math.max(safeItemHeight, Number(height) || safeItemHeight);
+	const visibleCount = Math.max(1, Math.ceil(safeHeight / safeItemHeight));
+	const start = Math.max(
+		0,
+		Math.floor((Number(scrollTop) || 0) / safeItemHeight) - overscan,
+	);
+	const end = Math.min(safeItemCount, start + visibleCount + overscan * 2);
+
+	return {
+		start,
+		end,
+		visibleCount,
+		topSpacerHeight: start * safeItemHeight,
+		bottomSpacerHeight: (safeItemCount - end) * safeItemHeight,
+	};
+}
+
+function VirtualList(props = {}) {
+	const {
+		items = [],
+		itemHeight = 32,
+		height = 320,
+		scrollTop = 0,
+		overscan = 4,
+		renderItem,
+		onScroll,
+		style = {},
+		emptyMessage = "Nothing to render.",
+	} = props;
+
+	if (typeof renderItem !== "function") {
+		throw new Error("VirtualList requires a renderItem function.");
+	}
+
+	const windowState = getVirtualWindow({
+		itemCount: items.length,
+		itemHeight,
+		height,
+		scrollTop,
+		overscan,
+	});
+
+	const visibleItems = items.slice(windowState.start, windowState.end);
+	const listHeight = `${height}px`;
+	const rowHeight = `${itemHeight}px`;
+
+	return createElement(
+		"div",
+		{
+			style: {
+				height: listHeight,
+				overflowY: "auto",
+				overflowAnchor: "none",
+				...style,
+			},
+			onScroll,
+		},
+		items.length === 0
+			? createElement("p", { style: { margin: "0" } }, emptyMessage)
+			: [
+					createElement("div", {
+						style: { height: `${windowState.topSpacerHeight}px` },
+					}),
+					...visibleItems.map((item, index) =>
+						createElement(
+							"div",
+							{
+								style: {
+									height: rowHeight,
+									boxSizing: "border-box",
+								},
+							},
+							renderItem(item, windowState.start + index),
+						),
+					),
+					createElement("div", {
+						style: { height: `${windowState.bottomSpacerHeight}px` },
+					}),
+				],
+	);
+}
+
+async function request(method, url, options = {}) {
+	const hasBody = options.body != null;
+	const response = await fetch(url, {
+		method,
+		headers: {
+			...(hasBody ? { "Content-Type": "application/json" } : {}),
+			...(options.headers || {}),
+		},
+		body: hasBody ? JSON.stringify(options.body) : undefined,
+	});
+
+	if (!response.ok) {
+		throw new Error(`${method} ${url} failed: ${response.status}`);
+	}
+
+	const contentType = response.headers.get("content-type") || "";
+	if (contentType.includes("application/json")) {
+		return response.json();
+	}
+
+	return response.text();
+}
 
 const http = {
-	async get(url) {
-		const res = await fetch(url);
-		if (!res.ok) throw new Error(`GET ${url} failed: ${res.status}`);
-		return res.json();
+	request,
+	get(url, options = {}) {
+		return request("GET", url, options);
 	},
-
-	async post(url, data) {
-		const res = await fetch(url, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify(data),
-		});
-		if (!res.ok) throw new Error(`POST ${url} failed: ${res.status}`);
-		return res.json();
+	post(url, body, options = {}) {
+		return request("POST", url, { ...options, body });
+	},
+	put(url, body, options = {}) {
+		return request("PUT", url, { ...options, body });
+	},
+	patch(url, body, options = {}) {
+		return request("PATCH", url, { ...options, body });
+	},
+	delete(url, options = {}) {
+		return request("DELETE", url, options);
 	},
 };
+
+if (typeof window !== "undefined") {
+	Object.assign(window, {
+		Reactive,
+		Component,
+		createElement,
+		mount,
+		rerender,
+		Store,
+		Router,
+		Link,
+		VirtualList,
+		getVirtualWindow,
+		http,
+	});
+}
