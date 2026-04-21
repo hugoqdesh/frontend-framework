@@ -6,6 +6,7 @@ The framework is intentionally compact. It focuses on core requirements instead 
 - reusable function and class components
 - reactive state with rerendering
 - shared state across pages with `Store`
+- persisted state between sessions with `Store`
 - routing based on the browser URL
 - render-time event registration, delegation, and event modifiers
 - HTTP requests through a small `http` client
@@ -13,7 +14,7 @@ The framework is intentionally compact. It focuses on core requirements instead 
 
 The demo app is a minimal two-route task demo:
 
-- `#/` task state, form handling, delegated events, and HTTP actions
+- `#/` persisted task state, form handling, class and function components, delegated events, and HTTP actions
 - `#/performance` a 10,000-row virtualized list that still reads shared state
 
 ## Setup And Installation
@@ -55,11 +56,13 @@ The framework is loaded in the browser through:
 3. Click `POST` to show `http.post(...)`.
 4. Toggle tasks with delegated checkbox events.
 5. Remove a task to show direct event handlers and propagation control.
-6. Move to `#/performance` and scroll the list to show virtualization.
+6. Refresh the page to confirm tasks persist between sessions.
+7. Move to `#/performance` and scroll the list to show virtualization.
 
 ## Additional Features
 
 - both function components and class components
+- opt-in persisted stores backed by browser storage
 - event modifiers through declarative handler objects
 - hash and history router modes
 - a helper for calculating visible virtual list ranges

@@ -1,18 +1,56 @@
-const tasks = Store.create("tasks", [
+function hasSavedTasks() {
+	try {
+		return (
+			typeof window !== "undefined" &&
+			window.localStorage.getItem("example:tasks") != null
+		);
+	} catch (error) {
+		return false;
+	}
+}
+
+const defaultTasks = [
 	{ id: 1, title: "Build the example", done: false, source: "local" },
 	{ id: 2, title: "Document the framework", done: true, source: "local" },
-]);
+];
 
-const ui = Store.create("ui", {
+const restoredSession = hasSavedTasks();
+
+const defaultUi = {
 	draft: "",
-	message: "Demo",
+	message: restoredSession ? "Restored previous session." : "Demo",
 	loading: false,
 	selectedId: 1,
 	scrollTop: 0,
+};
+
+const tasks = Store.create("tasks", defaultTasks, {
+	persist: true,
+	storageKey: "example:tasks",
+});
+
+const ui = Store.create("ui", defaultUi, {
+	persist: true,
+	storageKey: "example:ui",
+	serialize(value) {
+		return JSON.stringify({
+			draft: value.draft,
+			selectedId: value.selectedId,
+			scrollTop: value.scrollTop,
+		});
+	},
+	deserialize(rawValue) {
+		return { ...defaultUi, ...JSON.parse(rawValue) };
+	},
 });
 
 const rows = Array.from({ length: 10000 }, (_, index) => `Row ${index + 1}`);
-let nextId = tasks.value.length + 1;
+let draftInput = null;
+let nextId =
+	tasks.value.reduce(
+		(maxId, task) => Math.max(maxId, Number(task.id) || 0),
+		0,
+	) + 1;
 let renderQueued = false;
 
 function setUi(patch) {
@@ -56,6 +94,10 @@ function addTask() {
 		draft: "",
 		selectedId: task.id,
 		message: `Added "${title}".`,
+	});
+
+	queueMicrotask(() => {
+		draftInput?.focus();
 	});
 }
 
@@ -143,8 +185,35 @@ async function postTask() {
 	}
 }
 
+class SessionSummary extends Component {
+	render() {
+		const { restored, totalTasks, selectedTitle } = this.props;
+
+		return createElement(
+			"section",
+			{
+				style: {
+					padding: "10px 12px",
+					marginBottom: "12px",
+					border: "1px solid #d1d5db",
+					background: "#f8fafc",
+				},
+			},
+			createElement(
+				"strong",
+				{},
+				restored ? "Session restored." : "Fresh session.",
+			),
+			" ",
+			`Saved tasks: ${totalTasks}.`,
+			selectedTitle ? ` Focused task: ${selectedTitle}.` : "",
+		);
+	}
+}
+
 function Layout({ title, children }) {
 	const summary = counts();
+	const task = selectedTask();
 
 	return createElement(
 		"main",
@@ -167,6 +236,11 @@ function Layout({ title, children }) {
 			),
 		),
 		createElement("h1", {}, title),
+		createElement(SessionSummary, {
+			restored: restoredSession,
+			totalTasks: summary.total,
+			selectedTitle: task?.title || null,
+		}),
 		ui.value.loading ? createElement("p", {}, "Loading...") : null,
 		createElement("p", {}, ui.value.message),
 		...children,
@@ -236,6 +310,9 @@ function HomePage() {
 			createElement("input", {
 				type: "text",
 				value: ui.value.draft,
+				ref: (element) => {
+					draftInput = element;
+				},
 				onInput: (event) => setUi({ draft: event.target.value }),
 				placeholder: "New task",
 				style: { flex: "1" },

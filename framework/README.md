@@ -187,6 +187,43 @@ const settingsStore = Store.create("settings", { theme: "light" });
 console.log(Store.get("user").value.name);
 ```
 
+Persist a store between browser sessions:
+
+```js
+const tasks = Store.create("tasks", [], {
+	persist: true,
+	storageKey: "example:tasks",
+});
+```
+
+Persist only part of a store:
+
+```js
+const ui = Store.create(
+	"ui",
+	{ draft: "", selectedId: 1 },
+	{
+		persist: true,
+		serialize(value) {
+			return JSON.stringify({
+				draft: value.draft,
+				selectedId: value.selectedId,
+			});
+		},
+		deserialize(rawValue) {
+			return { draft: "", selectedId: 1, ...JSON.parse(rawValue) };
+		},
+	},
+);
+```
+
+Supported store options:
+
+- `persist`
+- `storageKey`
+- `serialize(value)`
+- `deserialize(rawValue)`
+
 ### Routing
 
 `Router` maps URLs to components and renders the active route.
@@ -384,6 +421,7 @@ This is the framework's explicit performance optimization. The example app uses 
 
 - Use `Reactive` for local state owned by one area of the UI.
 - Use `Store` when multiple routes or components depend on the same data.
+- Use store persistence for state that should survive reloads or browser restarts.
 - Prefer updating state through helper functions instead of mutating nested structures inline.
 
 ### Keep Components Small
@@ -417,7 +455,9 @@ The demo in `example/` intentionally exercises every major feature:
 
 - routing across three pages
 - shared state across routes
+- persisted state across browser sessions
 - forms and controlled inputs
+- function and class components
 - direct and delegated events
 - event propagation control
 - GET and POST requests
