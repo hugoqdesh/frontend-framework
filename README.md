@@ -1,71 +1,104 @@
 # Frontend Framework
 
-The framework is intentionally compact. It focuses on core requirements instead of recreating a full production ecosystem:
+Repo has two directories:
+
+- `framework/` contains framework source and framework documentation
+- `example/` contains demo app that uses every major feature
+
+## Project Overview
+
+Framework focuses on core needs instead of full ecosystem size:
 
 - declarative UI creation with `createElement(...)`
-- reusable function and class components
-- reactive state with rerendering
-- shared state across pages with `Store`
-- persisted state between sessions with `Store`
-- routing based on the browser URL
-- render-time event registration, delegation, and event modifiers
-- HTTP requests through a small `http` client
-- virtualized rendering for large lists
+- reusable function components
+- reactive state with `Reactive`
+- shared and persisted state with `Store`
+- URL-based routing with `Router`
+- render-time event registration through props
+- delegated events and event modifiers
+- HTTP requests through `http`
+- performance optimization through `VirtualList`
 
-The demo app is a minimal two-route task demo:
+Framework follows framework-style conventions:
 
-- `#/` persisted task state, form handling, class and function components, delegated events, and HTTP actions
-- `#/performance` a 10,000-row virtualized list that still reads shared state
+- one render root
+- views described declaratively
+- state changes trigger framework rerenders
+- routes register centrally
+- events are declared in render output, not wired imperatively later
 
 ## Setup And Installation
 
 ### Requirements
 
-- Node.js 18+ or another static file server
+- Node.js 18+ or any other static file server
 
-### Run The Demo
+### Run Demo
 
-Serve the repository root so the browser can load both `framework/` and `example/`:
+Serve repo root so browser can load both `framework/` and `example/`:
 
 ```bash
 npx serve .
 ```
 
-Then open:
+Open:
 
 ```text
 http://localhost:3000/example/
 ```
 
-The example app uses hash routing, so refreshing on sub-routes works without extra server configuration.
+Demo uses hash routing, so refreshes on sub-routes work on a simple static server.
 
 ## Usage Guide
 
 ### Framework Entry Point
 
-The framework is loaded in the browser through:
+Import framework entrypoint from module code:
 
-```html
-<script src="../framework/framework.js"></script>
+```js
+import {
+	createElement,
+	Reactive,
+	Store,
+	Router,
+} from "../framework/framework.js";
 ```
 
 ### Review Walkthrough
 
-1. Open `#/` and add a task with the form.
-2. Click `GET` to show `http.get(...)`.
-3. Click `POST` to show `http.post(...)`.
-4. Toggle tasks with delegated checkbox events.
-5. Remove a task to show direct event handlers and propagation control.
-6. Refresh the page to confirm tasks persist between sessions.
-7. Move to `#/performance` and scroll the list to show virtualization.
+1. Open `#/` and add task through form submit.
+2. Toggle tasks with delegated checkbox handler.
+3. Remove task to show `stopPropagation`.
+4. Refresh page to confirm persisted state survives sessions.
+5. Click `GET` to load remote tasks with `http.get(...)`.
+6. Click `POST` to send selected task with `http.post(...)`.
+7. Move to `#/performance` to confirm routing, shared state, and virtualization.
+
+### Ideas Reviewer Can Add
+
+Framework and docs should make these easy to add during review:
+
+- priority badges on tasks
+- route for archived tasks
+- extra fields in persisted UI store
+- filter input tied to shared state
+- alternate remote endpoint for `http`
 
 ## Additional Features
 
-- both function components and class components
+Required extras included:
+
 - opt-in persisted stores backed by browser storage
-- event modifiers through declarative handler objects
-- hash and history router modes
-- a helper for calculating visible virtual list ranges
+- event delegation and declarative event modifiers
+- HTTP helper around `fetch(...)`
+- virtualized rendering for 10,000-row lists
+- validated virtualization effect: performance route renders only visible rows plus spacers, not all 10,000 rows
+
+Small convenience bonuses included:
+
+- `ref` callbacks for grabbing rendered elements
+- optional `history` router mode
+- split source files inside `framework/` for easier review and maintenance
 
 ## Documentation
 

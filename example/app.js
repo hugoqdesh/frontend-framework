@@ -1,3 +1,12 @@
+import {
+	Store,
+	Router,
+	Link,
+	VirtualList,
+	http,
+	createElement,
+} from "../framework/framework.js";
+
 function hasSavedTasks() {
 	try {
 		return (
@@ -16,18 +25,18 @@ const defaultTasks = [
 
 const restoredSession = hasSavedTasks();
 
-const defaultUi = {
-	draft: "",
-	message: restoredSession ? "Restored previous session." : "Demo",
-	loading: false,
-	selectedId: 1,
-	scrollTop: 0,
-};
-
 const tasks = Store.create("tasks", defaultTasks, {
 	persist: true,
 	storageKey: "example:tasks",
 });
+
+const defaultUi = {
+	draft: "",
+	message: restoredSession ? "Restored previous session." : "Demo ready.",
+	loading: false,
+	selectedId: tasks.value[0]?.id ?? null,
+	scrollTop: 0,
+};
 
 const ui = Store.create("ui", defaultUi, {
 	persist: true,
@@ -67,16 +76,29 @@ function queueRender() {
 	});
 }
 
-[tasks, ui].forEach((state) => state.subscribe(queueRender));
-
 function selectedTask() {
 	return tasks.value.find((task) => task.id === ui.value.selectedId) || null;
 }
+
+function ensureSelectedTask() {
+	if (tasks.value.length === 0) return;
+	if (selectedTask()) return;
+
+	ui.value = {
+		...ui.value,
+		selectedId: tasks.value[0].id,
+	};
+}
+
+ensureSelectedTask();
+
+[tasks, ui].forEach((state) => state.subscribe(queueRender));
 
 function counts() {
 	return {
 		total: tasks.value.length,
 		done: tasks.value.filter((task) => task.done).length,
+		open: tasks.value.filter((task) => !task.done).length,
 	};
 }
 
@@ -103,12 +125,13 @@ function addTask() {
 
 function removeTask(id) {
 	const task = tasks.value.find((entry) => entry.id === id);
-	tasks.value = tasks.value.filter((entry) => entry.id !== id);
+	const nextTasks = tasks.value.filter((entry) => entry.id !== id);
 
+	tasks.value = nextTasks;
 	setUi({
 		selectedId:
 			ui.value.selectedId === id
-				? (tasks.value[0]?.id ?? null)
+				? (nextTasks[0]?.id ?? null)
 				: ui.value.selectedId,
 		message: task ? `Removed "${task.title}".` : "Task removed.",
 	});
@@ -185,30 +208,26 @@ async function postTask() {
 	}
 }
 
-class SessionSummary extends Component {
-	render() {
-		const { restored, totalTasks, selectedTitle } = this.props;
-
-		return createElement(
-			"section",
-			{
-				style: {
-					padding: "10px 12px",
-					marginBottom: "12px",
-					border: "1px solid #d1d5db",
-					background: "#f8fafc",
-				},
+function SessionSummary({ restored, totalTasks, selectedTitle }) {
+	return createElement(
+		"section",
+		{
+			style: {
+				padding: "10px 12px",
+				marginBottom: "12px",
+				border: "1px solid #d1d5db",
+				background: "#f8fafc",
 			},
-			createElement(
-				"strong",
-				{},
-				restored ? "Session restored." : "Fresh session.",
-			),
-			" ",
-			`Saved tasks: ${totalTasks}.`,
-			selectedTitle ? ` Focused task: ${selectedTitle}.` : "",
-		);
-	}
+		},
+		createElement(
+			"strong",
+			{},
+			restored ? "Session restored." : "Fresh session.",
+		),
+		" ",
+		`Saved tasks: ${totalTasks}.`,
+		selectedTitle ? ` Focused task: ${selectedTitle}.` : "",
+	);
 }
 
 function Layout({ title, children }) {
@@ -219,20 +238,29 @@ function Layout({ title, children }) {
 		"main",
 		{
 			style: {
-				maxWidth: "720px",
+				maxWidth: "760px",
 				margin: "24px auto",
+				padding: "0 16px",
 				fontFamily: "sans-serif",
+				lineHeight: "1.4",
 			},
 		},
 		createElement(
 			"nav",
-			{ style: { display: "flex", gap: "12px", marginBottom: "16px" } },
+			{
+				style: {
+					display: "flex",
+					gap: "12px",
+					marginBottom: "16px",
+					alignItems: "center",
+				},
+			},
 			createElement(Link, { to: "/" }, "Home"),
 			createElement(Link, { to: "/performance" }, "Performance"),
 			createElement(
 				"span",
-				{ style: { marginLeft: "auto" } },
-				`tasks: ${summary.total}, done: ${summary.done}`,
+				{ style: { marginLeft: "auto", color: "#475569" } },
+				`tasks: ${summary.total}, done: ${summary.done}, open: ${summary.open}`,
 			),
 		),
 		createElement("h1", {}, title),
@@ -242,7 +270,7 @@ function Layout({ title, children }) {
 			selectedTitle: task?.title || null,
 		}),
 		ui.value.loading ? createElement("p", {}, "Loading...") : null,
-		createElement("p", {}, ui.value.message),
+		createElement("p", { style: { color: "#475569" } }, ui.value.message),
 		...children,
 	);
 }
@@ -255,7 +283,10 @@ function TaskList() {
 	return createElement(
 		"ul",
 		{
-			onChange: ["input[data-id]", toggleTask],
+			onChange: {
+				delegate: "input[data-id]",
+				handler: toggleTask,
+			},
 			style: { paddingLeft: "20px" },
 		},
 		...tasks.value.map((task) =>
@@ -267,7 +298,7 @@ function TaskList() {
 							selectedId: task.id,
 							message: `Selected "${task.title}".`,
 						}),
-					style: { marginBottom: "8px" },
+					style: { marginBottom: "8px", cursor: "pointer" },
 				},
 				createElement("input", {
 					type: "checkbox",
@@ -304,7 +335,10 @@ function HomePage() {
 		createElement(
 			"form",
 			{
-				onSubmit: { handler: addTask, preventDefault: true },
+				onSubmit: {
+					handler: addTask,
+					preventDefault: true,
+				},
 				style: { display: "flex", gap: "8px", marginBottom: "12px" },
 			},
 			createElement("input", {
@@ -354,6 +388,11 @@ function PerformancePage() {
 				? `Shared state still available: ${selectedTask().title}`
 				: "Shared state still available: none",
 		),
+		createElement(
+			"p",
+			{},
+			"VirtualList keeps about 18 rows in DOM here instead of all 10,000.",
+		),
 		createElement(VirtualList, {
 			items: rows,
 			itemHeight: 24,
@@ -378,6 +417,4 @@ Router.add("/", HomePage)
 	.add("/performance", PerformancePage)
 	.notFound(NotFoundPage);
 
-window.addEventListener("DOMContentLoaded", () => {
-	Router.start(document.getElementById("root"), { mode: "hash" });
-});
+Router.start(document.getElementById("root"), { mode: "hash" });
