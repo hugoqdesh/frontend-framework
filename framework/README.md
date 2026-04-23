@@ -1,58 +1,71 @@
 # Framework Documentation
 
-This is a minimal frontend framework for building browser interfaces with plain JavaScript. It is designed around a few small primitives that work together:
+Main primitives:
 
-- `createElement(...)` describes the UI as virtual nodes
-- `mount(...)` and `rerender(...)` turn those nodes into real DOM updates
-- `Reactive` and `Store` keep application state synchronized with the UI
-- `Router` switches views based on the URL
-- declarative event props attach listeners during rendering
+- `createElement(...)` describes UI trees
+- `mount(...)` renders first view
+- `rerender(...)` redraws active view after state changes
+- `Reactive` stores reactive values
+- `Store` shares and optionally persists state
+- `Router` controls the view from the URL
+- `Link` performs declarative navigation
 - `http` wraps browser `fetch(...)`
-- `VirtualList` renders only visible rows for large collections
+- `VirtualList` renders only visible rows from very large lists
+
+## Source Layout
+
+Framework is split by responsibility:
+
+- `reactive.js` for `Reactive`
+- `events.js` for declarative event descriptors, delegation, and modifiers
+- `dom.js` for element creation and rendering
+- `store.js` for shared state and persistence
+- `router.js` for URL routing and `Link`
+- `http.js` for remote requests
+- `virtual-list.js` for performance helpers
+- `framework.js` as public entrypoint that re-exports everything
 
 ## Architecture And Design Principles
 
-### 1. Small Surface Area
+### 1. Framework Conventions Over Manual DOM Code
 
-The framework exposes a small number of primitives instead of a large API. Each primitive solves one job:
+Applications are expected to follow one flow:
 
-- rendering
-- state
-- routing
-- events
-- data fetching
-- performance for large lists
+1. Describe UI with `createElement(...)`.
+2. Keep app state inside `Reactive` or `Store`.
+3. Subscribe state changes to `rerender(...)` or `Router.render()`.
+4. Register routes centrally with `Router`.
+5. Declare events in element props during rendering.
 
-### 2. Declarative UI
+This is closer to framework usage than a loose helper library, because render flow, routing, state flow, and event declaration all follow one opinionated pattern.
 
-Applications describe what the UI should look like with nested `createElement(...)` calls. The framework then creates or patches real DOM elements.
+### 2. Small Core, Required Features Only
 
-### 3. Reactive Updates
+Framework intentionally skips large abstractions such as a template compiler or diff-heavy component model. It keeps required assignment features, but avoids hidden magic.
 
-State lives in `Reactive` values. When a value changes, subscribers rerender the active view.
+### 3. Full Rerender For Simplicity
 
-### 4. Reusable Components
+Regular UI updates rerender from current root vnode. This keeps rendering code easy to reason about and easy to explain during review.
 
-You can define components as:
+### 4. Explicit Performance Optimization
 
-- plain functions
-- classes that extend `Component`
+Instead of making whole renderer complex, performance work is isolated to `VirtualList`. Small views stay simple. Large lists get virtualization.
 
 ### 5. Static Hosting Friendly
 
-The router supports both:
-
-- `history` mode for clean URLs
-- `hash` mode for static servers without SPA fallback support
-
-The example app uses `hash` mode so it runs correctly from a simple static server.
+Hash routing works with any static file server. Optional history mode exists when the server can return SPA shell files for every route.
 
 ## Installation
 
-No package installation is required for the framework itself. Include it as a browser script:
+No package install is needed for framework itself. Import public entrypoint from module code:
 
-```html
-<script src="../framework/framework.js"></script>
+```js
+import {
+	createElement,
+	Reactive,
+	mount,
+	rerender,
+} from "../framework/framework.js";
 ```
 
 For local development:
@@ -61,7 +74,7 @@ For local development:
 npx serve .
 ```
 
-Then visit:
+Then open:
 
 ```text
 http://localhost:3000/example/
@@ -69,12 +82,18 @@ http://localhost:3000/example/
 
 ## Getting Started
 
-This is the smallest app:
+Smallest app:
 
 ```html
 <div id="root"></div>
-<script src="./framework/framework.js"></script>
-<script>
+<script type="module">
+	import {
+		Reactive,
+		createElement,
+		mount,
+		rerender,
+	} from "./framework/framework.js";
+
 	const counter = new Reactive(0);
 
 	function App() {
@@ -94,116 +113,155 @@ This is the smallest app:
 		);
 	}
 
-	counter.subscribe(() => rerender(App()));
+	counter.subscribe(() => rerender());
+
 	window.addEventListener("DOMContentLoaded", () => {
-		mount(App(), document.getElementById("root"));
+		mount(createElement(App), document.getElementById("root"));
 	});
 </script>
 ```
 
 How it works:
 
-1. `Reactive` stores the state.
-2. `App()` returns a virtual node tree.
-3. `mount(...)` renders the initial DOM.
-4. `counter.subscribe(...)` rerenders the app after state changes.
+1. `Reactive` owns state.
+2. `App` returns a virtual tree.
+3. `mount(...)` renders first view.
+4. `counter.subscribe(...)` tells framework to rerender when state changes.
 
 ## Feature Reference
 
 ### `createElement(tag, props, ...children)`
 
-Creates a virtual node.
+Creates virtual nodes for DOM tags or function components.
 
 ```js
-const vnode = createElement(
+const button = createElement(
 	"button",
-	{ className: "primary", onClick: () => alert("Clicked") },
+	{
+		type: "button",
+		className: "primary",
+		onClick: () => console.log("save"),
+	},
 	"Save",
 );
 ```
 
 Supported prop patterns:
 
-- regular attributes such as `id`, `type`, `placeholder`, `data-*`
+- DOM attributes like `id`, `type`, `placeholder`, `data-*`
 - `className`
-- `style` as a string or object
-- controlled form props such as `value` and `checked`
+- `style` as string or object
+- form values like `value` and `checked`
 - `ref` callback
-- event props such as `onClick`, `onInput`, `onSubmit`
+- `scrollTop` for scroll containers
+- event props like `onClick`, `onInput`, `onSubmit`, `onChange`
 
-### Components
+### Reusable Components
 
-#### Function Component
+Components are plain functions that receive props and return virtual nodes.
 
 ```js
-function Badge({ children }) {
+function Badge({ tone = "neutral", children }) {
 	return createElement(
 		"span",
-		{ style: { padding: "4px 8px", border: "1px solid #ccc" } },
+		{
+			style: {
+				padding: "4px 8px",
+				border: "1px solid #cbd5e1",
+				background: tone === "success" ? "#dcfce7" : "#f8fafc",
+			},
+		},
 		...children,
 	);
 }
 ```
 
-#### Class Component
+Use them like:
 
 ```js
-class Banner extends Component {
-	render() {
-		return createElement("p", {}, this.props.message);
-	}
+createElement(Badge, { tone: "success" }, "Ready");
+```
+
+### DOM Manipulation
+
+The framework abstracts direct DOM creation. You describe nested nodes, attributes, styles, and listeners in one tree.
+
+```js
+function Card({ title, body }) {
+	return createElement(
+		"article",
+		{
+			style: {
+				padding: "16px",
+				border: "1px solid #d1d5db",
+				borderRadius: "12px",
+			},
+		},
+		createElement("h2", {}, title),
+		createElement("p", {}, body),
+	);
 }
 ```
 
+This covers:
+
+- creating elements
+- nesting elements
+- manipulating attributes
+- manipulating styles
+- wiring events at render time
+- handling user input and forms
+
 ### `Reactive`
 
-`Reactive` stores a value and notifies subscribers when the value changes.
+`Reactive` stores one reactive value and notifies subscribers after updates.
 
 ```js
 const search = new Reactive("");
 
-search.subscribe(() => {
-	rerender(App());
+search.subscribe((value) => {
+	console.log("next", value);
 });
 
-search.value = "Frontend";
-search.update((value) => value + " Framework");
+search.value = "frontend";
+search.update((value) => value.toUpperCase());
 ```
 
-Useful methods:
+Methods:
 
-- `value` getter and setter
+- `value` getter/setter
 - `update(updater)`
 - `subscribe(callback, options?)`
 
 ### `Store`
 
-`Store` manages shared `Reactive` values by key. This is useful for state that multiple components or pages depend on.
+`Store` manages shared `Reactive` values by key.
 
 ```js
-const userStore = Store.create("user", { name: "Ada" });
-const settingsStore = Store.create("settings", { theme: "light" });
+const user = Store.create("user", { name: "Ada" });
+const ui = Store.create("ui", { open: false });
 
 console.log(Store.get("user").value.name);
 ```
 
-Persist a store between browser sessions:
+Persist state across sessions:
 
 ```js
 const tasks = Store.create("tasks", [], {
 	persist: true,
-	storageKey: "example:tasks",
+	storageKey: "demo:tasks",
 });
 ```
 
-Persist only part of a store:
+Persist only selected fields:
 
 ```js
 const ui = Store.create(
 	"ui",
-	{ draft: "", selectedId: 1 },
+	{ draft: "", selectedId: null, loading: false },
 	{
 		persist: true,
+		storageKey: "demo:ui",
 		serialize(value) {
 			return JSON.stringify({
 				draft: value.draft,
@@ -211,7 +269,12 @@ const ui = Store.create(
 			});
 		},
 		deserialize(rawValue) {
-			return { draft: "", selectedId: 1, ...JSON.parse(rawValue) };
+			return {
+				draft: "",
+				selectedId: null,
+				loading: false,
+				...JSON.parse(rawValue),
+			};
 		},
 	},
 );
@@ -226,7 +289,7 @@ Supported store options:
 
 ### Routing
 
-`Router` maps URLs to components and renders the active route.
+`Router` maps URL paths to components.
 
 ```js
 function Home() {
@@ -238,7 +301,10 @@ function About() {
 }
 
 Router.add("/", Home).add("/about", About);
-Router.start(document.getElementById("root"), { mode: "hash" });
+
+window.addEventListener("DOMContentLoaded", () => {
+	Router.start(document.getElementById("root"), { mode: "hash" });
+});
 ```
 
 Programmatic navigation:
@@ -255,12 +321,12 @@ createElement(Link, { to: "/about" }, "About");
 
 Router modes:
 
-- `hash` - best for static hosting
-- `history` - best when your server can return the SPA shell for every route
+- `hash` for static hosting
+- `history` when server supports SPA fallback routing
 
 ### Event Handling
 
-This attaches event listeners through render-time props. You do not need to manually call `addEventListener(...)` in app code.
+Event listeners are declared in render output, not attached manually after querying DOM nodes. This is why framework event handling is more than raw `addEventListener(...)`.
 
 #### Direct Handlers
 
@@ -270,24 +336,24 @@ createElement(
 	{
 		onClick: () => console.log("clicked"),
 	},
-	"Click me",
+	"Click",
 );
 ```
 
 #### Delegated Handlers
 
-Attach one listener to a parent and respond to matching children:
+Attach one listener to parent and react to matching children:
 
 ```js
 createElement(
 	"ul",
 	{
-		onClick: [
-			"button[data-action='remove']",
-			(_, target) => {
-				console.log("remove", target.getAttribute("data-id"));
+		onChange: {
+			delegate: "input[data-id]",
+			handler: (event, target) => {
+				console.log(target.getAttribute("data-id"));
 			},
-		],
+		},
 	},
 	...items,
 );
@@ -295,7 +361,7 @@ createElement(
 
 #### Event Modifiers
 
-Use handler objects when you want the framework to apply browser event controls:
+Use handler objects when the framework should control browser defaults:
 
 ```js
 createElement(
@@ -310,7 +376,22 @@ createElement(
 );
 ```
 
-Supported modifier fields:
+Stop bubbling:
+
+```js
+createElement(
+	"button",
+	{
+		onClick: {
+			handler: removeItem,
+			stopPropagation: true,
+		},
+	},
+	"Remove",
+);
+```
+
+Supported event descriptor fields:
 
 - `handler`
 - `delegate`
@@ -318,43 +399,14 @@ Supported modifier fields:
 - `stopPropagation`
 - `options`
 
-### DOM Manipulation
-
-This abstracts DOM creation and updates through virtual nodes and diffing. Developers do not need to manually query and mutate elements to keep the interface in sync.
-
-Example:
-
-```js
-function ProfileCard(user) {
-	return createElement(
-		"article",
-		{
-			style: {
-				padding: "16px",
-				border: "1px solid #ddd",
-				borderRadius: "12px",
-			},
-		},
-		createElement("h2", {}, user.name),
-		createElement("p", {}, user.role),
-	);
-}
-```
-
-This covers:
-
-- creating elements
-- nesting elements
-- adding listeners
-- setting attributes and styles
-- handling form input
-
 ### HTTP Requests
 
-The `http` helper wraps `fetch(...)` and returns parsed JSON when possible.
+`http` wraps browser `fetch(...)` and parses JSON when response content type is JSON.
 
 ```js
-const posts = await http.get("https://jsonplaceholder.typicode.com/posts");
+const todos = await http.get(
+	"https://jsonplaceholder.typicode.com/todos?_limit=3",
+);
 
 const created = await http.post("https://jsonplaceholder.typicode.com/posts", {
 	title: "Hello",
@@ -372,19 +424,19 @@ Available methods:
 
 ### Performance: Virtualized Rendering
 
-This includes a virtualization helper for large scrollable lists.
+Large collections do not need every row in DOM at once.
 
 #### `getVirtualWindow(...)`
 
-Calculates which rows should be rendered.
+Calculates visible slice:
 
 ```js
 const windowState = getVirtualWindow({
 	itemCount: 10000,
-	itemHeight: 44,
-	height: 360,
-	scrollTop: 220,
-	overscan: 6,
+	itemHeight: 28,
+	height: 240,
+	scrollTop: 560,
+	overscan: 4,
 });
 ```
 
@@ -398,67 +450,73 @@ Returned fields:
 
 #### `VirtualList`
 
-Renders only the visible portion of a list.
+Render only visible rows:
 
 ```js
 createElement(VirtualList, {
 	items,
-	itemHeight: 44,
-	height: 360,
+	itemHeight: 28,
+	height: 240,
 	scrollTop,
 	onScroll: (event) => {
 		scrollState.value = event.target.scrollTop;
 	},
-	renderItem: (item) => createElement("div", {}, item.label),
+	renderItem: (item, index) =>
+		createElement("div", {}, `${index + 1}. ${item.label}`),
 });
 ```
 
-This is the framework's explicit performance optimization. The example app uses it to keep a 10,000-row list fast and readable.
+Performance decision:
+
+- normal framework rendering stays simple
+- only large-list rendering gets special logic
+- example app proves it with 10,000 rows on `#/performance`
+- with `height: 240`, `itemHeight: 24`, and `overscan: 4`, the demo keeps about 18 row nodes in DOM instead of 10,000
 
 ## Best Practices
 
 ### Keep State Intentional
 
-- Use `Reactive` for local state owned by one area of the UI.
-- Use `Store` when multiple routes or components depend on the same data.
-- Use store persistence for state that should survive reloads or browser restarts.
-- Prefer updating state through helper functions instead of mutating nested structures inline.
-
-### Keep Components Small
-
-- Split repeated UI into components early.
-- Pass data through props instead of reading unrelated stores directly inside every component.
-
-### Prefer Hash Routing On Static Hosts
-
-- Use `mode: "hash"` when serving the project from a simple static server.
-- Use `mode: "history"` only when your backend or dev server supports SPA fallback routing.
-
-### Use Delegation For Repeated Lists
-
-- Delegate events from a parent when rendering many similar children.
-- Use direct handlers when the interaction belongs to a single element.
-
-### Use Virtualization Only When Needed
-
-- For small lists, render normally.
-- For very large lists, tables, or pickers, use `VirtualList`.
+- Use `Reactive` for state owned by one view or one concern.
+- Use `Store` when multiple components or routes depend on same data.
+- Persist only fields that should survive reloads.
 
 ### Keep Rerenders Centralized
 
-- Subscribe state once near app bootstrap.
-- Trigger rerenders from subscriptions instead of manually mutating DOM nodes.
+- Subscribe state near app bootstrap.
+- Trigger `rerender()` or `Router.render()` from subscriptions instead of manually mutating DOM.
+- Batch multiple state updates when useful.
+
+### Prefer Delegation For Repeated Lists
+
+- Use delegated handlers on parent lists and tables.
+- Use direct handlers for single controls.
+
+### Keep Components Small
+
+- Split repeated markup into function components early.
+- Pass explicit props instead of reading unrelated global state everywhere.
+
+### Use Hash Routing On Static Hosts
+
+- Use `mode: "hash"` with simple static servers.
+- Use `mode: "history"` only when server fallback exists.
+
+### Use Virtualization Only For Large Collections
+
+- Small lists should render normally.
+- Very large lists, pickers, or tables should use `VirtualList`.
 
 ## Example Application Notes
 
-The demo in `example/` intentionally exercises every major feature:
+`example/` intentionally exercises all major features:
 
-- routing across three pages
-- shared state across routes
-- persisted state across browser sessions
-- forms and controlled inputs
-- function and class components
-- direct and delegated events
-- event propagation control
-- GET and POST requests
-- virtualized rendering
+- shared state with `Store`
+- persisted state between sessions
+- forms and controlled input
+- render-time event listeners
+- delegated checkbox handling
+- `preventDefault` and `stopPropagation`
+- programmatic and declarative routing
+- remote GET and POST requests
+- virtualized 10,000-row rendering
