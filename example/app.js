@@ -55,6 +55,7 @@ const ui = Store.create("ui", defaultUi, {
 
 const rows = Array.from({ length: 10000 }, (_, index) => `Row ${index + 1}`);
 let draftInput = null;
+let draftValue = ui.value.draft;
 let nextId =
 	tasks.value.reduce(
 		(maxId, task) => Math.max(maxId, Number(task.id) || 0),
@@ -103,7 +104,7 @@ function counts() {
 }
 
 function addTask() {
-	const title = ui.value.draft.trim();
+	const title = draftValue.trim();
 
 	if (!title) {
 		setUi({ message: "Type a task first." });
@@ -112,6 +113,7 @@ function addTask() {
 
 	const task = { id: nextId++, title, done: false, source: "local" };
 	tasks.value = [task, ...tasks.value];
+	draftValue = "";
 	setUi({
 		draft: "",
 		selectedId: task.id,
@@ -137,9 +139,7 @@ function removeTask(id) {
 	});
 }
 
-function toggleTask(_, target) {
-	const id = Number(target.getAttribute("data-id"));
-
+function toggleTask(id) {
 	tasks.value = tasks.value.map((task) =>
 		task.id === id ? { ...task, done: !task.done } : task,
 	);
@@ -187,7 +187,7 @@ async function loadRemoteTasks() {
 }
 
 async function postTask() {
-	const title = ui.value.draft.trim() || selectedTask()?.title || "Untitled";
+	const title = draftValue.trim() || selectedTask()?.title || "Untitled";
 	setUi({ loading: true, message: "Posting..." });
 
 	try {
@@ -282,13 +282,7 @@ function TaskList() {
 
 	return createElement(
 		"ul",
-		{
-			onChange: {
-				delegate: "input[data-id]",
-				handler: toggleTask,
-			},
-			style: { paddingLeft: "20px" },
-		},
+		{ style: { paddingLeft: "20px" } },
 		...tasks.value.map((task) =>
 			createElement(
 				"li",
@@ -303,7 +297,14 @@ function TaskList() {
 				createElement("input", {
 					type: "checkbox",
 					checked: task.done,
-					"data-id": task.id,
+					onClick: {
+						handler: () => {},
+						stopPropagation: true,
+					},
+					onChange: {
+						handler: () => toggleTask(task.id),
+						stopPropagation: true,
+					},
 				}),
 				" ",
 				task.title,
@@ -343,11 +344,17 @@ function HomePage() {
 			},
 			createElement("input", {
 				type: "text",
-				value: ui.value.draft,
+				value: draftValue,
 				ref: (element) => {
 					draftInput = element;
 				},
-				onInput: (event) => setUi({ draft: event.target.value }),
+				onInput: (event) => {
+					draftValue = event.target.value;
+				},
+				onBlur: () => {
+					if (ui.value.draft === draftValue) return;
+					setUi({ draft: draftValue });
+				},
 				placeholder: "New task",
 				style: { flex: "1" },
 			}),
